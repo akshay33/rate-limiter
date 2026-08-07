@@ -1,0 +1,15 @@
+# Maven
+target/
+*.class
+
+# IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Claude Code local state (nothing project-specific committed yet)
+.claude/
+
+# OS
+.DS_Store
