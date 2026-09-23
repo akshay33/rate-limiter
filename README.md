@@ -47,15 +47,25 @@ limiter.tryAcquire(5);
 
 ## Build & test
 
-**Requirements:** Java 21+, Maven 3.6+
+**Requirements:** Java 21+. Maven doesn't need to be installed; the
+included Maven Wrapper (`./mvnw`) downloads the right version on first run.
 
 ```bash
 git clone https://github.com/<your-username>/rate-limiter.git
 cd rate-limiter
 
-mvn test       # compile and run the test suite
-mvn package    # build the jar (target/rate-limiter-1.0.0-SNAPSHOT.jar)
+./mvnw test       # compile and run the test suite
+./mvnw package    # build the jars
 ```
+
+The core library jar is written to
+`ratelimiter-core/target/ratelimiter-core-1.0.0-SNAPSHOT.jar`.
+
+## Project layout
+
+| Module | Contents |
+|---|---|
+| `ratelimiter-core` | `RateLimiter` interface and the in-memory `TokenBucketRateLimiter`. No external dependencies. |
 
 ## Scope
 

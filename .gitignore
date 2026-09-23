@@ -11,5 +11,8 @@ target/
 # Claude Code local state (nothing project-specific committed yet)
 .claude/
 
+# Local planning notes
+plan/
+
 # OS
 .DS_Store

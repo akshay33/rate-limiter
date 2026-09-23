@@ -1,9 +1,6 @@
 package io.github.akshay.ratelimiter;
 
-/**
- * A rate limiter that controls how frequently an operation is allowed to
- * proceed, based on a configurable budget of permits.
- */
+/** Limits how often an operation may proceed, based on a budget of permits. */
 public interface RateLimiter {
 
     /**

@@ -7,12 +7,7 @@ import java.util.function.LongSupplier;
 /**
  * Thread-safe token bucket rate limiter.
  *
- * <p>The bucket starts full with {@code capacity} tokens. Each call to
- * {@link #tryAcquire()} first lazily refills the bucket based on elapsed
- * time since the last refill, then attempts to deduct the requested number
- * of permits. Refilling is lazy (computed on demand) rather than driven by
- * a background thread, so the limiter has no extra threads or timers to
- * manage.
+ * Starts full and refills lazily on each {@link #tryAcquire()} call, so no background thread is needed.
  */
 public final class TokenBucketRateLimiter implements RateLimiter {
 
@@ -25,18 +20,15 @@ public final class TokenBucketRateLimiter implements RateLimiter {
     private long lastRefillNanos;
 
     /**
-     * @param capacity     maximum number of tokens the bucket can hold
-     * @param refillTokens number of tokens added per {@code refillPeriod}
-     * @param refillPeriod the period over which {@code refillTokens} are added
+     * @param capacity     max tokens in the bucket
+     * @param refillTokens tokens added per period
+     * @param refillPeriod how often tokens are added
      */
     public TokenBucketRateLimiter(long capacity, long refillTokens, Duration refillPeriod) {
         this(capacity, refillTokens, refillPeriod, System::nanoTime);
     }
 
-    /**
-     * Package-private constructor allowing injection of the time source, so
-     * refill behavior can be tested deterministically without real sleeps.
-     */
+    /** Accepts a custom time source so tests can control time instead of sleeping. */
     TokenBucketRateLimiter(long capacity, long refillTokens, Duration refillPeriod, LongSupplier nanoTimeSource) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive");
