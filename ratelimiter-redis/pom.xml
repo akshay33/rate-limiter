@@ -10,16 +10,35 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>ratelimiter-core</artifactId>
+    <artifactId>ratelimiter-redis</artifactId>
     <packaging>jar</packaging>
 
-    <name>ratelimiter-core</name>
-    <description>In-memory token bucket rate limiter with no external dependencies.</description>
+    <name>ratelimiter-redis</name>
+    <description>Redis-backed token bucket rate limiter, shared across application instances.</description>
 
     <dependencies>
         <dependency>
+            <groupId>io.github.akshay</groupId>
+            <artifactId>ratelimiter-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

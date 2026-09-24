@@ -47,8 +47,10 @@ limiter.tryAcquire(5);
 
 ## Build & test
 
-**Requirements:** Java 21+. Maven doesn't need to be installed; the
-included Maven Wrapper (`./mvnw`) downloads the right version on first run.
+**Requirements:** Java 21+ and a running Docker (the Redis module's tests start
+a real Redis with [Testcontainers](https://testcontainers.com)). Maven doesn't
+need to be installed; the included Maven Wrapper (`./mvnw`) downloads the right
+version on first run.
 
 ```bash
 git clone https://github.com/<your-username>/rate-limiter.git
@@ -65,7 +67,8 @@ The core library jar is written to
 
 | Module | Contents |
 |---|---|
-| `ratelimiter-core` | `RateLimiter` interface and the in-memory `TokenBucketRateLimiter`. No external dependencies. |
+| `ratelimiter-core` | `RateLimiter` and the in-memory `TokenBucketRateLimiter`; `KeyedRateLimiter` and `InMemoryKeyedRateLimiter` for one bucket per key (e.g. per client IP); `FallbackKeyedRateLimiter` switches to a fallback limiter while the primary (e.g. Redis) is unavailable. No external dependencies. |
+| `ratelimiter-redis` | `RedisTokenBucketRateLimiter`: buckets live in Redis, so all application instances share one limit per key. Refill and deduct run atomically in a Lua script using Redis's clock. Depends on Lettuce. |
 
 ## Scope
 

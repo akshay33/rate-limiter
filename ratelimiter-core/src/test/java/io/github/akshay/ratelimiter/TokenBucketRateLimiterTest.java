@@ -76,6 +76,40 @@ class TokenBucketRateLimiterTest {
     }
 
     @Test
+    void rejectsPermitsAboveCapacity() {
+        RateLimiter limiter = new TokenBucketRateLimiter(5, 1, Duration.ofSeconds(1));
+        assertThrows(IllegalArgumentException.class, () -> limiter.tryAcquire(6));
+    }
+
+    @Test
+    void rejectionReportsTimeUntilEnoughTokensRefill() {
+        AtomicLong clock = new AtomicLong(0);
+        // capacity 2, refills 1 token per second
+        TokenBucketRateLimiter limiter = new TokenBucketRateLimiter(2, 1, Duration.ofSeconds(1), clock::get);
+
+        assertTrue(limiter.decide(2).allowed());
+
+        RateLimitDecision rejected = limiter.decide(2);
+        assertFalse(rejected.allowed());
+        assertDurationNear(Duration.ofSeconds(2), rejected.retryAfter());
+
+        clock.addAndGet(Duration.ofMillis(500).toNanos());
+        assertDurationNear(Duration.ofMillis(1500), limiter.decide(2).retryAfter());
+    }
+
+    @Test
+    void allowedDecisionHasNoRetryAfter() {
+        TokenBucketRateLimiter limiter = new TokenBucketRateLimiter(1, 1, Duration.ofSeconds(1));
+        assertEquals(Duration.ZERO, limiter.decide(1).retryAfter());
+    }
+
+    /** Refill math uses doubles, so allow a microsecond of rounding. */
+    static void assertDurationNear(Duration expected, Duration actual) {
+        long diffNanos = Math.abs(expected.toNanos() - actual.toNanos());
+        assertTrue(diffNanos <= 1_000, "expected ~" + expected + " but was " + actual);
+    }
+
+    @Test
     void concurrentAcquiresNeverExceedCapacity() throws InterruptedException {
         int capacity = 1_000;
         int threadCount = 5_000;

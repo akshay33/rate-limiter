@@ -30,15 +30,7 @@ public final class TokenBucketRateLimiter implements RateLimiter {
 
     /** Accepts a custom time source so tests can control time instead of sleeping. */
     TokenBucketRateLimiter(long capacity, long refillTokens, Duration refillPeriod, LongSupplier nanoTimeSource) {
-        if (capacity <= 0) {
-            throw new IllegalArgumentException("capacity must be positive");
-        }
-        if (refillTokens <= 0) {
-            throw new IllegalArgumentException("refillTokens must be positive");
-        }
-        if (refillPeriod.isZero() || refillPeriod.isNegative()) {
-            throw new IllegalArgumentException("refillPeriod must be positive");
-        }
+        validateConfig(capacity, refillTokens, refillPeriod);
         this.capacity = capacity;
         this.refillTokensPerNano = (double) refillTokens / refillPeriod.toNanos();
         this.nanoTimeSource = nanoTimeSource;
@@ -53,19 +45,52 @@ public final class TokenBucketRateLimiter implements RateLimiter {
 
     @Override
     public boolean tryAcquire(int permits) {
+        return decide(permits).allowed();
+    }
+
+    /** Like {@link #tryAcquire(int)}, but on rejection also reports how long until it could succeed. */
+    RateLimitDecision decide(int permits) {
         if (permits <= 0) {
             throw new IllegalArgumentException("permits must be positive");
+        }
+        if (permits > capacity) {
+            throw new IllegalArgumentException("permits must not exceed capacity (" + capacity + ")");
         }
         lock.lock();
         try {
             refill();
             if (availableTokens >= permits) {
                 availableTokens -= permits;
-                return true;
+                return RateLimitDecision.allow();
             }
-            return false;
+            double missingTokens = permits - availableTokens;
+            long waitNanos = (long) Math.ceil(missingTokens / refillTokensPerNano);
+            return RateLimitDecision.reject(Duration.ofNanos(waitNanos));
         } finally {
             lock.unlock();
+        }
+    }
+
+    /** True once the bucket has fully refilled, at which point it behaves like a brand-new bucket. */
+    boolean isFull() {
+        lock.lock();
+        try {
+            refill();
+            return availableTokens >= capacity;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    static void validateConfig(long capacity, long refillTokens, Duration refillPeriod) {
+        if (capacity <= 0) {
+            throw new IllegalArgumentException("capacity must be positive");
+        }
+        if (refillTokens <= 0) {
+            throw new IllegalArgumentException("refillTokens must be positive");
+        }
+        if (refillPeriod.isZero() || refillPeriod.isNegative()) {
+            throw new IllegalArgumentException("refillPeriod must be positive");
         }
     }
 

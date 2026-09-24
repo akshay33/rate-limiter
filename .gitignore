@@ -13,6 +13,7 @@ target/
 
 # Local planning notes
 plan/
+known-issues/
 
 # OS
 .DS_Store
