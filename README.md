@@ -69,6 +69,14 @@ The core library jar is written to
 |---|---|
 | `ratelimiter-core` | `RateLimiter` and the in-memory `TokenBucketRateLimiter`; `KeyedRateLimiter` and `InMemoryKeyedRateLimiter` for one bucket per key (e.g. per client IP); `FallbackKeyedRateLimiter` switches to a fallback limiter while the primary (e.g. Redis) is unavailable. No external dependencies. |
 | `ratelimiter-redis` | `RedisTokenBucketRateLimiter`: buckets live in Redis, so all application instances share one limit per key. Refill and deduct run atomically in a Lua script using Redis's clock. Depends on Lettuce. |
+| `backend` | Spring Boot demo service (`GET /api/hello`, `/actuator/health`) that sits behind the gateway. Knows nothing about rate limiting. |
+
+Run the backend on its own:
+
+```bash
+./mvnw -pl backend -am package -DskipTests
+java -jar backend/target/backend-1.0.0-SNAPSHOT.jar   # http://localhost:8081/api/hello
+```
 
 ## Scope
 

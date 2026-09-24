@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: backend
+
+server:
+  # The gateway takes 8080 when running locally; override with SERVER_PORT.
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
