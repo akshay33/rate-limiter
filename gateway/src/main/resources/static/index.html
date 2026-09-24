@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rate Limiter Demo</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1d2330;
+      --muted: #5f6b7a;
+      --border: #dde2e8;
+      --accent: #2f6fed;
+      --accent-text: #ffffff;
+      --ok: #1f8a4c;
+      --ok-bg: #e5f5ec;
+      --limited: #c0392b;
+      --limited-bg: #fbe9e7;
+      --error: #8a5a00;
+      --error-bg: #fdf1dc;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151b;
+        --card: #1b2029;
+        --text: #e6e9ef;
+        --muted: #98a2b3;
+        --border: #2c3340;
+        --accent: #5b8cff;
+        --accent-text: #0d1117;
+        --ok: #4cc38a;
+        --ok-bg: #173226;
+        --limited: #ff7b6b;
+        --limited-bg: #3a1d1a;
+        --error: #f0b44c;
+        --error-bg: #362b17;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
+    h1 { font-size: 1.6rem; margin: 0 0 4px; }
+    .subtitle { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    button {
+      font: inherit;
+      border-radius: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .stats { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+    .stat { flex: 1 1 120px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .stat .label { color: var(--muted); font-size: 0.85rem; }
+    .stat .value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat.ok .value { color: var(--ok); }
+    .stat.limited .value { color: var(--limited); }
+    .notice { margin-top: 16px; padding: 10px 12px; border-radius: 8px; display: none; }
+    .notice.show { display: block; }
+    .notice.limited { background: var(--limited-bg); color: var(--limited); }
+    .notice.ready { background: var(--ok-bg); color: var(--ok); }
+    .log-header { display: flex; justify-content: space-between; align-items: baseline; }
+    .log-header h2 { font-size: 1.1rem; margin: 0 0 12px; }
+    .empty { color: var(--muted); }
+    ol { list-style: none; margin: 0; padding: 0; }
+    li {
+      display: grid;
+      grid-template-columns: 3.5em 9.5em 1fr;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 0;
+      border-top: 1px solid var(--border);
+      font-size: 0.95rem;
+    }
+    li .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .badge.ok { background: var(--ok-bg); color: var(--ok); }
+    .badge.limited { background: var(--limited-bg); color: var(--limited); }
+    .badge.error { background: var(--error-bg); color: var(--error); }
+    .detail { color: var(--muted); overflow-wrap: anywhere; }
+    .detail strong { color: var(--text); font-weight: 600; }
+    @media (max-width: 480px) {
+      li { grid-template-columns: 2.5em 1fr; }
+      li .detail { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Rate Limiter Demo</h1>
+  <p class="subtitle">
+    Each click sends a request through the gateway to the backend. Send them quickly
+    and the gateway starts answering <strong>429 Too Many Requests</strong>.
+  </p>
+
+  <section class="card" aria-label="Controls">
+    <div class="actions">
+      <button id="send-one" class="primary">Send request</button>
+      <button id="send-burst">Send 20 at once</button>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="stats">
+      <div class="stat ok"><div class="label">Allowed (200)</div><div class="value" id="allowed-count">0</div></div>
+      <div class="stat limited"><div class="label">Rate limited (429)</div><div class="value" id="limited-count">0</div></div>
+    </div>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="card" aria-label="Responses">
+    <div class="log-header"><h2>Responses</h2></div>
+    <p id="empty" class="empty">No requests yet.</p>
+    <ol id="log" aria-live="polite"></ol>
+  </section>
+</main>
+
+<script>
+  const log = document.getElementById("log");
+  const empty = document.getElementById("empty");
+  const notice = document.getElementById("notice");
+  const allowedCount = document.getElementById("allowed-count");
+  const limitedCount = document.getElementById("limited-count");
+  const buttons = [document.getElementById("send-one"), document.getElementById("send-burst")];
+
+  let requestNumber = 0;
+  let allowed = 0;
+  let limited = 0;
+  let countdownTimer = null;
+
+  async function sendRequest() {
+    const number = ++requestNumber;
+    try {
+      const response = await fetch("/api/hello", { cache: "no-store" });
+      const servedBy = response.headers.get("X-Served-By");
+      if (response.status === 200) {
+        const body = await response.json().catch(() => ({}));
+        allowed++;
+        addEntry(number, "ok", "200 Allowed", [["", body.message || "OK"], ["served by", servedBy]]);
+      } else if (response.status === 429) {
+        const retryAfter = Number(response.headers.get("Retry-After")) || 1;
+        limited++;
+        addEntry(number, "limited", "429 Rate limited", [["retry after", retryAfter + "s"], ["served by", servedBy]]);
+        startCountdown(retryAfter);
+      } else {
+        addEntry(number, "error", response.status + " Error", [["", response.statusText], ["served by", servedBy]]);
+      }
+    } catch (e) {
+      addEntry(number, "error", "No response", [["", "Couldn't reach the gateway"]]);
+    }
+    updateStats();
+  }
+
+  function addEntry(number, kind, label, details) {
+    empty.hidden = true;
+    const item = document.createElement("li");
+
+    const num = document.createElement("span");
+    num.className = "num";
+    num.textContent = "#" + number;
+
+    const badge = document.createElement("span");
+    badge.className = "badge " + kind;
+    badge.textContent = label;
+
+    const detail = document.createElement("span");
+    detail.className = "detail";
+    details.filter(([, value]) => value).forEach(([name, value], i) => {
+      if (i > 0) detail.append(" · ");
+      if (name) detail.append(name + " ");
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      detail.append(strong);
+    });
+
+    item.append(num, badge, detail);
+    log.prepend(item);
+  }
+
+  function updateStats() {
+    allowedCount.textContent = allowed;
+    limitedCount.textContent = limited;
+  }
+
+  function startCountdown(seconds) {
+    clearInterval(countdownTimer);
+    let remaining = seconds;
+    const show = () => {
+      notice.className = "notice show limited";
+      notice.textContent = "Rate limited. Try again in " + remaining + "s.";
+    };
+    show();
+    countdownTimer = setInterval(() => {
+      remaining--;
+      if (remaining > 0) {
+        show();
+      } else {
+        clearInterval(countdownTimer);
+        notice.className = "notice show ready";
+        notice.textContent = "You can send another request now.";
+      }
+    }, 1000);
+  }
+
+  async function run(count) {
+    buttons.forEach(b => (b.disabled = true));
+    try {
+      await Promise.all(Array.from({ length: count }, sendRequest));
+    } finally {
+      buttons.forEach(b => (b.disabled = false));
+    }
+  }
+
+  document.getElementById("send-one").addEventListener("click", () => run(1));
+  document.getElementById("send-burst").addEventListener("click", () => run(20));
+  document.getElementById("clear").addEventListener("click", () => {
+    clearInterval(countdownTimer);
+    log.replaceChildren();
+    empty.hidden = false;
+    notice.className = "notice";
+    requestNumber = allowed = limited = 0;
+    updateStats();
+  });
+</script>
+</body>
+</html>

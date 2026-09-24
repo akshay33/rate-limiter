@@ -1,0 +1,80 @@
+# Local cluster: nginx → 3 gateways (shared limits in Redis) → backend.
+#   docker compose up --build     then open http://localhost:8080
+# Only nginx publishes a port; everything else is reachable only inside this network.
+
+x-gateway: &gateway
+  build:
+    context: .
+    args:
+      MODULE: gateway
+  image: rate-limiter/gateway
+  environment: &gateway-env
+    RATELIMIT_MODE: redis
+    RATELIMIT_REDIS_URL: redis://redis:6379
+    RATELIMIT_TRUST_FORWARDED_FOR: "true"   # safe: nginx overwrites X-Forwarded-For
+    BACKEND_URL: http://backend:8081
+    DEMO_SHOW_INSTANCE: "true"
+  healthcheck: &java-health
+    # The JRE image has no curl; bash's /dev/tcp is enough for a health probe.
+    test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+    start_period: 10s
+  depends_on:
+    redis:
+      condition: service_healthy
+    backend:
+      condition: service_healthy
+
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  backend:
+    build:
+      context: .
+      args:
+        MODULE: backend
+    image: rate-limiter/backend
+    healthcheck:
+      <<: *java-health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+
+  gw1:
+    <<: *gateway
+    environment:
+      <<: *gateway-env
+      DEMO_INSTANCE_ID: gw1
+
+  gw2:
+    <<: *gateway
+    environment:
+      <<: *gateway-env
+      DEMO_INSTANCE_ID: gw2
+
+  gw3:
+    <<: *gateway
+    environment:
+      <<: *gateway-env
+      DEMO_INSTANCE_ID: gw3
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      # Mount the folder, not the single file, so edits show up after `nginx -s reload`.
+      - ./nginx:/etc/nginx/conf.d:ro
+    depends_on:
+      gw1:
+        condition: service_healthy
+      gw2:
+        condition: service_healthy
+      gw3:
+        condition: service_healthy

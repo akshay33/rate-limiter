@@ -1,0 +1,9 @@
+# Keep the Docker build context to what the build needs.
+**/target/
+.git/
+.idea/
+.claude/
+plan/
+known-issues/
+*.iml
+.DS_Store

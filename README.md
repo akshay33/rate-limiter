@@ -1,6 +1,33 @@
 # rate-limiter
 
-A thread-safe token bucket rate limiter for Java.
+A thread-safe token bucket rate limiter for Java, and a distributed
+rate-limiting gateway built on it: several gateway instances share one limit
+per client IP through Redis.
+
+## Quickstart: run the cluster
+
+Requires Docker.
+
+```bash
+docker compose up --build
+```
+
+Then open **http://localhost:8080** and click **Send 20 at once**: 5 requests
+are allowed and the rest get `429 Too Many Requests`, even though the requests
+are spread across three gateway instances.
+
+```
+ browser ──► nginx :8080 ──► gw1 ┐
+               (round-robin) gw2 ├──► backend
+                             gw3 ┘
+                              │
+                            Redis   (shared token buckets, one per client IP)
+```
+
+Only nginx is reachable from outside; the gateways, backend and Redis are on
+Docker's internal network. If Redis goes down, each gateway falls back to its
+own in-memory limit (so the site stays up and still limited), and switches back
+when Redis returns. Stop everything with `docker compose down`.
 
 ## Usage
 
@@ -70,13 +97,21 @@ The core library jar is written to
 | `ratelimiter-core` | `RateLimiter` and the in-memory `TokenBucketRateLimiter`; `KeyedRateLimiter` and `InMemoryKeyedRateLimiter` for one bucket per key (e.g. per client IP); `FallbackKeyedRateLimiter` switches to a fallback limiter while the primary (e.g. Redis) is unavailable. No external dependencies. |
 | `ratelimiter-redis` | `RedisTokenBucketRateLimiter`: buckets live in Redis, so all application instances share one limit per key. Refill and deduct run atomically in a Lua script using Redis's clock. Depends on Lettuce. |
 | `backend` | Spring Boot demo service (`GET /api/hello`, `/actuator/health`) that sits behind the gateway. Knows nothing about rate limiting. |
+| `gateway` | Spring Boot rate-limiting gateway. Limits `/api/**` by client IP (429 + `Retry-After` when over the limit) and forwards allowed requests to the backend. Uses Redis for one shared limit across gateway instances, falling back to in-memory limits while Redis is unavailable. |
 
-Run the backend on its own:
+Run it locally (Redis optional: without it, the gateway uses in-memory limits):
 
 ```bash
-./mvnw -pl backend -am package -DskipTests
-java -jar backend/target/backend-1.0.0-SNAPSHOT.jar   # http://localhost:8081/api/hello
+./mvnw package -DskipTests
+docker run -d -p 6379:6379 redis:7-alpine              # optional
+java -jar backend/target/backend-1.0.0-SNAPSHOT.jar    # :8081
+java -jar gateway/target/gateway-1.0.0-SNAPSHOT.jar    # :8080
+curl -i localhost:8080/api/hello                       # 5 quick requests, then 429
 ```
+
+Gateway settings live in `gateway/src/main/resources/application.yml` and can be
+overridden with environment variables (e.g. `RATELIMIT_MODE=memory`,
+`RATELIMIT_CAPACITY=10`, `BACKEND_URL=http://backend:8081`).
 
 ## Scope
 

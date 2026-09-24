@@ -16,6 +16,7 @@
         <module>ratelimiter-core</module>
         <module>ratelimiter-redis</module>
         <module>backend</module>
+        <module>gateway</module>
     </modules>
 
     <properties>
@@ -37,6 +38,11 @@
             <dependency>
                 <groupId>io.github.akshay</groupId>
                 <artifactId>ratelimiter-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.akshay</groupId>
+                <artifactId>ratelimiter-redis</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
