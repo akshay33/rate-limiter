@@ -26,6 +26,16 @@ final class GatewayClient {
         return send(HttpRequest.newBuilder(uri(path)).header("X-Forwarded-For", forwardedFor).build());
     }
 
+    /** Any method, with a body and extra headers. */
+    HttpResponse<String> send(String method, String path, String body, java.util.Map<String, String> headers) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri(path))
+                .method(method, body == null
+                        ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString(body));
+        headers.forEach(builder::header);
+        return send(builder.build());
+    }
+
     private URI uri(String path) {
         return URI.create("http://localhost:" + port + path);
     }

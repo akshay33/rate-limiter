@@ -1,5 +1,7 @@
 # rate-limiter
 
+[![CI](https://github.com/akshay33/rate-limiter/actions/workflows/ci.yml/badge.svg)](https://github.com/akshay33/rate-limiter/actions/workflows/ci.yml)
+
 A thread-safe token bucket rate limiter for Java, and a distributed
 rate-limiting gateway built on it: several gateway instances share one limit
 per client IP through Redis.
@@ -28,6 +30,29 @@ Only nginx is reachable from outside; the gateways, backend and Redis are on
 Docker's internal network. If Redis goes down, each gateway falls back to its
 own in-memory limit (so the site stays up and still limited), and switches back
 when Redis returns. Stop everything with `docker compose down`.
+
+## Load test results
+
+Measured by the end-to-end test (`ClusterE2ETest`), which starts the real
+cluster and sends 20 requests/s for 10 s from one client through nginx. Limit:
+5 requests, then 1 more every 2 s, so one bucket allows about 10 in that window.
+
+| Mode | Sent | Allowed | Rate limited | Served by |
+|---|---|---|---|---|
+| **Redis** (one shared bucket) | 200 | **9** | 191 | gw1 66, gw2 67, gw3 67 |
+| **In-memory** (a bucket per gateway) | 200 | **27** | 173 | gw1 66, gw2 67, gw3 67 |
+
+With in-memory limits, each of the 3 gateways enforces the limit separately, so
+the client gets **3×** the intended rate. With Redis, the limit holds across the
+whole cluster. When Redis was stopped mid-test, the gateways fell back to their
+own limits (18 of 80 allowed over 4 s, no errors) and returned to the shared
+limit (6 of 80) once Redis was back.
+
+Run it yourself (takes a few minutes; builds the images):
+
+```bash
+./mvnw -Pe2e -pl e2e verify     # results table: e2e/target/load-test-results.md
+```
 
 ## Usage
 

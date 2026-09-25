@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: # "Run workflow" button in the Actions tab
+
+# A newer push to the same branch cancels the older run, saving minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      # All modules and tests; the Redis tests start Redis with Testcontainers (Docker is preinstalled).
+      - name: Build and test
+        run: ./mvnw -B verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: '**/target/surefire-reports/'
+
+  e2e:
+    name: End-to-end cluster and load test
+    needs: build # only once the regular tests pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      # Builds the images and starts the real docker-compose cluster (nginx, 3 gateways, backend, Redis).
+      - name: End-to-end tests
+        run: ./mvnw -B -Pe2e -pl e2e verify
+
+      - name: Show load test results
+        if: always()
+        run: |
+          if [ -f e2e/target/load-test-results.md ]; then
+            { echo "## Load test results"; echo; cat e2e/target/load-test-results.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload e2e reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-reports
+          path: |
+            e2e/target/load-test-results.md
+            e2e/target/surefire-reports/
+          if-no-files-found: ignore

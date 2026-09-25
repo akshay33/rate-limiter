@@ -1,5 +1,6 @@
 # Local cluster: nginx → 3 gateways (shared limits in Redis) → backend.
 #   docker compose up --build     then open http://localhost:8080
+#   RATELIMIT_MODE=memory docker compose up --build   per-gateway limits (for comparison)
 # Only nginx publishes a port; everything else is reachable only inside this network.
 
 x-gateway: &gateway
@@ -9,7 +10,7 @@ x-gateway: &gateway
       MODULE: gateway
   image: rate-limiter/gateway
   environment: &gateway-env
-    RATELIMIT_MODE: redis
+    RATELIMIT_MODE: ${RATELIMIT_MODE:-redis}
     RATELIMIT_REDIS_URL: redis://redis:6379
     RATELIMIT_TRUST_FORWARDED_FOR: "true"   # safe: nginx overwrites X-Forwarded-For
     BACKEND_URL: http://backend:8081
@@ -67,7 +68,7 @@ services:
   nginx:
     image: nginx:stable-alpine
     ports:
-      - "8080:80"
+      - "${NGINX_PORT:-8080}:80"
     volumes:
       # Mount the folder, not the single file, so edits show up after `nginx -s reload`.
       - ./nginx:/etc/nginx/conf.d:ro

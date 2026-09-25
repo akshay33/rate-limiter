@@ -155,6 +155,79 @@ class InMemoryKeyedRateLimiterTest {
         }
     }
 
+    /**
+     * Refill, sweeps and acquires all overlapping: the clock moves forward while many threads
+     * acquire, with a sweep on every call. The bucket starts drained, so every refilled token must
+     * be granted exactly once. If a sweep ever replaced a partly used bucket with a fresh full one,
+     * more would be granted; if a token were lost, fewer.
+     */
+    @Test
+    void tokensAreConservedWhileTheClockMovesUnderLoad() throws Exception {
+        int capacity = 10;
+        int refillSteps = 20; // each step refills exactly 1 token
+        AtomicLong clock = new AtomicLong(0);
+        InMemoryKeyedRateLimiter limiter = new InMemoryKeyedRateLimiter(
+                capacity, 1, Duration.ofMillis(100), clock::get, Duration.ZERO);
+
+        // Start empty: a full bucket would (correctly) discard refills beyond capacity.
+        for (int i = 0; i < capacity; i++) {
+            assertTrue(limiter.tryAcquire("ip").allowed());
+        }
+
+        AtomicInteger granted = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicBoolean clockDone = new java.util.concurrent.atomic.AtomicBoolean();
+        // Task 0 moves the clock; the rest acquire. All are released at the same moment.
+        runConcurrently(33, i -> {
+            if (i == 0) {
+                try {
+                    for (int step = 0; step < refillSteps; step++) {
+                        Thread.sleep(1); // give workers time to consume each refill
+                        clock.addAndGet(Duration.ofMillis(100).toNanos());
+                    }
+                } finally {
+                    clockDone.set(true);
+                }
+                return;
+            }
+            while (!clockDone.get()) {
+                if (limiter.tryAcquire("ip").allowed()) {
+                    granted.incrementAndGet();
+                }
+            }
+        });
+        // Collect anything refilled after the workers stopped, so every token is accounted for.
+        // Bounded, so a limiter that allows everything fails the assertion instead of looping forever.
+        for (int i = 0; i < capacity + refillSteps && limiter.tryAcquire("ip").allowed(); i++) {
+            granted.incrementAndGet();
+        }
+
+        assertEquals(refillSteps, granted.get(), "every refilled token granted exactly once");
+    }
+
+    @Test
+    void retryAfterStaysWithinBoundsForMultiPermitRequestsUnderLoad() throws Exception {
+        int capacity = 5;
+        int permits = 3;
+        AtomicLong clock = new AtomicLong(0);
+        KeyedRateLimiter limiter = limiter(capacity, clock, InMemoryKeyedRateLimiter.DEFAULT_SWEEP_INTERVAL);
+        // 1 token per second, so refilling 3 permits from empty takes at most 3 s.
+        Duration maxWait = Duration.ofSeconds(permits);
+        java.util.Queue<Duration> waits = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+        runConcurrently(200, i -> {
+            RateLimitDecision decision = limiter.tryAcquire("ip", permits);
+            if (!decision.allowed()) {
+                waits.add(decision.retryAfter());
+            }
+        });
+
+        assertEquals(199, waits.size(), "only one 3-permit request fits in a bucket of 5");
+        for (Duration wait : waits) {
+            assertTrue(!wait.isZero() && !wait.isNegative() && wait.compareTo(maxWait) <= 0,
+                    "retry-after out of bounds: " + wait);
+        }
+    }
+
     private static InMemoryKeyedRateLimiter limiter(long capacity, AtomicLong clock, Duration sweepInterval) {
         return new InMemoryKeyedRateLimiter(capacity, 1, ONE_SECOND, clock::get, sweepInterval);
     }

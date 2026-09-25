@@ -19,7 +19,8 @@ class ClientIpResolver {
             if (forwardedFor != null && !forwardedFor.isBlank()) {
                 // "client, proxy1, proxy2": entries on the left can be forged by the client, so use the
                 // last one, which was added by the proxy directly in front of us.
-                String[] hops = forwardedFor.split(",");
+                // -1 keeps a trailing empty entry ("a.b.c.d,"), which split() would otherwise drop.
+                String[] hops = forwardedFor.split(",", -1);
                 String last = hops[hops.length - 1].strip();
                 if (!last.isEmpty()) {
                     return last;

@@ -48,6 +48,17 @@
         </dependencies>
     </dependencyManagement>
 
+    <profiles>
+        <!-- End-to-end tests against the real Docker Compose cluster (slow: builds images).
+             Run with: ./mvnw -Pe2e -pl e2e verify -->
+        <profile>
+            <id>e2e</id>
+            <modules>
+                <module>e2e</module>
+            </modules>
+        </profile>
+    </profiles>
+
     <build>
         <pluginManagement>
             <plugins>
