@@ -3,7 +3,7 @@
 [![CI](https://github.com/akshay33/rate-limiter/actions/workflows/ci.yml/badge.svg)](https://github.com/akshay33/rate-limiter/actions/workflows/ci.yml)
 
 A rate-limiting gateway in Java that enforces one limit per client across
-several gateway instances, using a token bucket stored in Redis.
+several gateway instances, with the limiter state stored in Redis.
 
 The problem it solves: if each server keeps its own counter, three servers let a
 client through at three times the limit. Here the buckets live in Redis, so the
@@ -37,11 +37,28 @@ network. `docker compose down` stops everything.
 1. nginx sets `X-Forwarded-For` to the client's address, overwriting whatever the
    client sent.
 2. The gateway's filter takes the client IP and asks the limiter for a token.
-3. The limiter runs a Lua script in Redis that refills the bucket for the time
-   elapsed and takes a token, in one atomic step.
+3. The limiter runs a Lua script in Redis that, with the default token bucket,
+   refills the bucket for the time elapsed and takes a token, in one atomic step.
 4. No token: the gateway returns 429 with `Retry-After`. Otherwise it forwards the
    request to the backend and relays the response (502/504 if the backend is down
    or slow).
+
+## Algorithms
+
+Three algorithms, chosen by config. All three work in memory and in Redis.
+
+| Algorithm | How it counts | Trade-off |
+|---|---|---|
+| `token-bucket` (default) | Tokens refill at a steady rate; a request takes one | Allows bursts up to the capacity, then a steady rate |
+| `sliding-window-log` | Stores the time of each request; allows one if fewer than N fall in the last window | Exact, but memory grows with the limit |
+| `sliding-window-counter` | Counts for the current and previous window, the previous weighted by how much of it overlaps | Constant memory; slightly approximate |
+
+```yaml
+ratelimit:
+  algorithm: sliding-window-counter
+  limit: 5      # max requests (bucket capacity, or per window)
+  window: 10s   # sliding windows only
+```
 
 ## Design decisions
 
@@ -86,7 +103,7 @@ returned. CI on GitHub's runners gives the same numbers.
 
 ## Tests
 
-70 tests run on every build, plus 4 end-to-end tests against the Docker Compose
+106 tests run on every build, plus 4 end-to-end tests against the Docker Compose
 cluster. The Redis tests use a real Redis through Testcontainers.
 
 The concurrency tests were checked against deliberately broken versions to make
@@ -106,8 +123,8 @@ Maven isn't required; `./mvnw` downloads it. Java 21+.
 
 | Module | What's in it |
 |---|---|
-| `ratelimiter-core` | Token bucket, per-key limiter with idle-bucket cleanup, fallback wrapper. No dependencies. |
-| `ratelimiter-redis` | Redis-backed per-key limiter (Lua script, Lettuce client). |
+| `ratelimiter-core` | Token bucket and sliding window algorithms, per-key limiter with idle-state cleanup, config and factory, fallback wrapper. No dependencies. |
+| `ratelimiter-redis` | The same three algorithms in Redis, one Lua script each (Lettuce client). |
 | `gateway` | Spring Boot gateway: rate-limit filter, client IP handling, proxy to the backend, demo page. |
 | `backend` | Spring Boot demo service behind the gateway. No rate-limiting code. |
 | `e2e` | End-to-end and load tests against the compose cluster (built with `-Pe2e`). |
@@ -115,26 +132,16 @@ Maven isn't required; `./mvnw` downloads it. Java 21+.
 Using the library directly:
 
 ```java
-KeyedRateLimiter limiter = new InMemoryKeyedRateLimiter(5, 1, Duration.ofSeconds(2));
+RateLimitConfig config = RateLimitConfig.slidingWindowLog(5, Duration.ofSeconds(10));
+KeyedRateLimiter limiter = RateLimiters.inMemory(config);             // this process only
+KeyedRateLimiter shared = RedisRateLimiters.create(connection, config); // across instances
 
 RateLimitDecision decision = limiter.tryAcquire(clientIp);
 if (!decision.allowed()) {
-    // reject; decision.retryAfter() says how long until a token is free
+    // reject; decision.retryAfter() says how long until a request would succeed
 }
 ```
 
 The gateway is configured in `gateway/src/main/resources/application.yml`; any
 setting can be overridden with an environment variable, e.g.
-`RATELIMIT_MODE=memory`, `RATELIMIT_CAPACITY=10`, `BACKEND_URL=...`.
-
-## Known limitations
-
-- During a Redis outage the limit loosens to one bucket per gateway, and clients
-  start with a full bucket when the fallback kicks in.
-- Any Redis error triggers the fallback, including a bug in the Lua script, which
-  would only show up as a log warning.
-- If Redis hangs rather than going down, each request waits the full 100 ms
-  timeout. A circuit breaker would fix that.
-- Clients are keyed by full IP address. An IPv6 user can rotate through their /64
-  block to get fresh limits; keying IPv6 by /64 prefix would close that.
-- A single Redis instance, with no replication or failover.
+`RATELIMIT_ALGORITHM=sliding-window-log`, `RATELIMIT_LIMIT=10`, `BACKEND_URL=...`.
