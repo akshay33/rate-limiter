@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 
 import java.io.IOException;
@@ -33,13 +34,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GatewayRedisLateStartTest {
 
     private static final int REDIS_PORT = freePort();
+    /** Docker's host address; not localhost when the tests themselves run in a container. */
+    private static final String REDIS_HOST = DockerClientFactory.instance().dockerHostIpAddress();
     private static final StubBackend BACKEND = new StubBackend();
     private static GenericContainer<?> redis;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("backend.url", BACKEND::url);
-        registry.add("ratelimit.redis.url", () -> "redis://localhost:" + REDIS_PORT);
+        registry.add("ratelimit.redis.url", () -> "redis://" + REDIS_HOST + ":" + REDIS_PORT);
     }
 
     @AfterAll
@@ -75,7 +78,7 @@ class GatewayRedisLateStartTest {
         assertTrue(redisLimiter.isConnected(), "background reconnect should connect once Redis is up");
 
         assertEquals(200, gateway.get("/api/hello", "10.4.0.2").statusCode());
-        RedisClient client = RedisClient.create("redis://localhost:" + REDIS_PORT);
+        RedisClient client = RedisClient.create("redis://" + REDIS_HOST + ":" + REDIS_PORT);
         try (StatefulRedisConnection<String, String> connection = client.connect()) {
             assertEquals(1, connection.sync().exists("ratelimit:10.4.0.2"), "new requests are counted in Redis");
         } finally {

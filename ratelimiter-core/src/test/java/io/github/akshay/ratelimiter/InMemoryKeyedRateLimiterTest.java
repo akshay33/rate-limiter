@@ -160,10 +160,12 @@ class InMemoryKeyedRateLimiterTest {
      * acquire, with a sweep on every call. The bucket starts drained, so every refilled token must
      * be granted exactly once. If a sweep ever replaced a partly used bucket with a fresh full one,
      * more would be granted; if a token were lost, fewer.
+     *
+     * <p>Capacity exceeds the total refill, so the bucket never fills up and discards tokens, even on a slow CI machine.
      */
     @Test
     void tokensAreConservedWhileTheClockMovesUnderLoad() throws Exception {
-        int capacity = 10;
+        int capacity = 100;
         int refillSteps = 20; // each step refills exactly 1 token
         AtomicLong clock = new AtomicLong(0);
         InMemoryKeyedRateLimiter limiter = new InMemoryKeyedRateLimiter(
@@ -176,9 +178,13 @@ class InMemoryKeyedRateLimiterTest {
 
         AtomicInteger granted = new AtomicInteger();
         java.util.concurrent.atomic.AtomicBoolean clockDone = new java.util.concurrent.atomic.AtomicBoolean();
-        // Task 0 moves the clock; the rest acquire. All are released at the same moment.
-        runConcurrently(33, i -> {
-            if (i == 0) {
+        int workers = 8;
+        CountDownLatch start = new CountDownLatch(1);
+        // Platform threads: spinning virtual threads can starve the clock task on a 2-CPU machine and hang the test.
+        try (ExecutorService executor = Executors.newFixedThreadPool(workers + 1)) {
+            List<Future<?>> futures = new ArrayList<>();
+            futures.add(executor.submit(() -> {
+                start.await();
                 try {
                     for (int step = 0; step < refillSteps; step++) {
                         Thread.sleep(1); // give workers time to consume each refill
@@ -187,14 +193,24 @@ class InMemoryKeyedRateLimiterTest {
                 } finally {
                     clockDone.set(true);
                 }
-                return;
+                return null;
+            }));
+            for (int w = 0; w < workers; w++) {
+                futures.add(executor.submit(() -> {
+                    start.await();
+                    while (!clockDone.get()) {
+                        if (limiter.tryAcquire("ip").allowed()) {
+                            granted.incrementAndGet();
+                        }
+                    }
+                    return null;
+                }));
             }
-            while (!clockDone.get()) {
-                if (limiter.tryAcquire("ip").allowed()) {
-                    granted.incrementAndGet();
-                }
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.get();
             }
-        });
+        }
         // Collect anything refilled after the workers stopped, so every token is accounted for.
         // Bounded, so a limiter that allows everything fails the assertion instead of looping forever.
         for (int i = 0; i < capacity + refillSteps && limiter.tryAcquire("ip").allowed(); i++) {

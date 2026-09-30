@@ -139,10 +139,12 @@ class RedisEdgeCasesTest {
         RateLimitDecision rejected = limiter.tryAcquire("ip");
 
         assertFalse(rejected.allowed());
+        // 1 token/year isn't exact as a double, so the wait can round 1 µs past a year; allow 1 ms.
         assertTrue(rejected.retryAfter().compareTo(year.minusMinutes(1)) > 0
-                && rejected.retryAfter().compareTo(year) <= 0, "retry after " + rejected.retryAfter());
+                && rejected.retryAfter().compareTo(year.plusMillis(1)) <= 0, "retry after " + rejected.retryAfter());
         long ttlMs = connection.sync().pttl(RedisTokenBucketRateLimiter.KEY_PREFIX + "ip");
-        assertTrue(ttlMs > year.toMillis() && ttlMs <= year.toMillis() + 1_000, "expiry " + ttlMs + "ms");
+        // full refill (a year, possibly +1 ms of rounding) + the 1 s buffer
+        assertTrue(ttlMs > year.toMillis() && ttlMs <= year.toMillis() + 1_001, "expiry " + ttlMs + "ms");
     }
 
     @Test
