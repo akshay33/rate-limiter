@@ -73,7 +73,8 @@ class ClientIpResolverTest {
 
     private static ClientIpResolver resolver(boolean trustForwardedFor) {
         return new ClientIpResolver(new RateLimitProperties(
-                RateLimitProperties.Mode.MEMORY, 5, 1, Duration.ofSeconds(2), trustForwardedFor,
+                RateLimitProperties.Mode.MEMORY, RateLimitProperties.Algorithm.TOKEN_BUCKET, 5, Duration.ofSeconds(10),
+                1, Duration.ofSeconds(2), trustForwardedFor,
                 new RateLimitProperties.Redis("redis://localhost:6379", Duration.ofMillis(100), Duration.ofSeconds(2))));
     }
 }

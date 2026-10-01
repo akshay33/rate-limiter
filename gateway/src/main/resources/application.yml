@@ -9,8 +9,10 @@ server:
 # e.g. RATELIMIT_MODE=memory or BACKEND_URL=http://backend:8081.
 ratelimit:
   mode: redis                  # redis (shared, in-memory fallback) | memory (per gateway)
-  capacity: 5                  # burst of 5 requests...
-  refill-tokens: 1             # ...then 1 more...
+  algorithm: token-bucket      # token-bucket | sliding-window-log | sliding-window-counter
+  limit: 5                     # max requests: bucket capacity, or per window
+  window: 10s                  # sliding windows: 5 requests per 10 s
+  refill-tokens: 1             # token bucket: after the burst of 5, 1 more...
   refill-period: 2s            # ...every 2 seconds
   trust-forwarded-for: false   # only true behind a proxy that overwrites X-Forwarded-For (nginx)
   redis:

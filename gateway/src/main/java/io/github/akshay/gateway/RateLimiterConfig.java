@@ -1,8 +1,8 @@
 package io.github.akshay.gateway;
 
 import io.github.akshay.ratelimiter.FallbackKeyedRateLimiter;
-import io.github.akshay.ratelimiter.InMemoryKeyedRateLimiter;
 import io.github.akshay.ratelimiter.KeyedRateLimiter;
+import io.github.akshay.ratelimiter.RateLimiters;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -51,6 +51,6 @@ class RateLimiterConfig {
     }
 
     private static KeyedRateLimiter inMemory(RateLimitProperties props) {
-        return new InMemoryKeyedRateLimiter(props.capacity(), props.refillTokens(), props.refillPeriod());
+        return RateLimiters.inMemory(props.toConfig());
     }
 }

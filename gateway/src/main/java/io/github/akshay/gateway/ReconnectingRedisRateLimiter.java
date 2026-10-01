@@ -3,7 +3,7 @@ package io.github.akshay.gateway;
 import io.github.akshay.ratelimiter.KeyedRateLimiter;
 import io.github.akshay.ratelimiter.RateLimitDecision;
 import io.github.akshay.ratelimiter.RateLimiterUnavailableException;
-import io.github.akshay.ratelimiter.redis.RedisTokenBucketRateLimiter;
+import io.github.akshay.ratelimiter.redis.RedisRateLimiters;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
@@ -33,7 +33,7 @@ final class ReconnectingRedisRateLimiter implements KeyedRateLimiter, AutoClosea
     private final ScheduledExecutorService reconnector;
 
     private volatile StatefulRedisConnection<String, String> connection;
-    private volatile RedisTokenBucketRateLimiter delegate;
+    private volatile KeyedRateLimiter delegate;
     /** Only touched by the constructor and then the single reconnect thread. */
     private boolean warnedUnreachable;
 
@@ -66,7 +66,7 @@ final class ReconnectingRedisRateLimiter implements KeyedRateLimiter, AutoClosea
 
     @Override
     public RateLimitDecision tryAcquire(String key, int permits) {
-        RedisTokenBucketRateLimiter current = delegate;
+        KeyedRateLimiter current = delegate;
         if (current == null) {
             throw new RateLimiterUnavailableException("Redis not connected yet", null);
         }
@@ -86,8 +86,7 @@ final class ReconnectingRedisRateLimiter implements KeyedRateLimiter, AutoClosea
     private boolean tryConnect() {
         try {
             connection = client.connect();
-            delegate = new RedisTokenBucketRateLimiter(
-                    connection, props.capacity(), props.refillTokens(), props.refillPeriod());
+            delegate = RedisRateLimiters.create(connection, props.toConfig());
             LOG.info("Connected to Redis at {}", props.redis().url());
             return true;
         } catch (RuntimeException e) {

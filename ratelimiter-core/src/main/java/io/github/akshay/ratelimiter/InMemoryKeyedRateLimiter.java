@@ -5,28 +5,30 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
- * In-memory {@link KeyedRateLimiter} with one token bucket per key.
+ * In-memory {@link KeyedRateLimiter} with separate state per key (a token bucket or a sliding
+ * window, see {@link RateLimiters#inMemory(RateLimitConfig)}).
  *
  * <p>State lives in this process only, so each server in a cluster enforces its own limit.
- * Buckets that have fully refilled are removed during periodic sweeps, which run on the
- * calling thread (no background thread).
+ * Idle state (a full bucket, an empty window) is removed during periodic sweeps, which run on
+ * the calling thread (no background thread).
  */
 public final class InMemoryKeyedRateLimiter implements KeyedRateLimiter {
 
     static final Duration DEFAULT_SWEEP_INTERVAL = Duration.ofSeconds(30);
 
-    private final long capacity;
-    private final long refillTokens;
-    private final Duration refillPeriod;
+    private final Supplier<KeyState> newState;
     private final LongSupplier nanoTimeSource;
     private final long sweepIntervalNanos;
 
-    private final ConcurrentHashMap<String, TokenBucketRateLimiter> buckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, KeyState> states = new ConcurrentHashMap<>();
     private final AtomicLong lastSweepNanos;
 
     /**
+     * Token bucket per key.
+     *
      * @param capacity     max tokens in each key's bucket
      * @param refillTokens tokens added per period
      * @param refillPeriod how often tokens are added
@@ -35,16 +37,24 @@ public final class InMemoryKeyedRateLimiter implements KeyedRateLimiter {
         this(capacity, refillTokens, refillPeriod, System::nanoTime, DEFAULT_SWEEP_INTERVAL);
     }
 
-    /** Accepts a custom time source and sweep interval so tests can control both. */
+    /** Token bucket per key, with a custom time source and sweep interval so tests can control both. */
     InMemoryKeyedRateLimiter(long capacity, long refillTokens, Duration refillPeriod,
                              LongSupplier nanoTimeSource, Duration sweepInterval) {
-        TokenBucketRateLimiter.validateConfig(capacity, refillTokens, refillPeriod);
+        this(RateLimitConfig.tokenBucket(capacity, refillTokens, refillPeriod), nanoTimeSource, sweepInterval);
+    }
+
+    /** Any algorithm, with a custom time source and sweep interval. */
+    InMemoryKeyedRateLimiter(RateLimitConfig config, LongSupplier nanoTimeSource, Duration sweepInterval) {
+        Objects.requireNonNull(config, "config");
         if (sweepInterval.isNegative()) {
             throw new IllegalArgumentException("sweepInterval must not be negative");
         }
-        this.capacity = capacity;
-        this.refillTokens = refillTokens;
-        this.refillPeriod = refillPeriod;
+        this.newState = switch (config) {
+            case RateLimitConfig.TokenBucket c -> () -> new TokenBucketState(new TokenBucketRateLimiter(
+                    c.capacity(), c.refillTokens(), c.refillPeriod(), nanoTimeSource));
+            case RateLimitConfig.SlidingWindowLog c -> () -> new SlidingWindowLogState(c.limit(), c.window(), nanoTimeSource);
+            case RateLimitConfig.SlidingWindowCounter c -> () -> new SlidingWindowCounterState(c.limit(), c.window(), nanoTimeSource);
+        };
         this.nanoTimeSource = nanoTimeSource;
         this.sweepIntervalNanos = sweepInterval.toNanos();
         this.lastSweepNanos = new AtomicLong(nanoTimeSource.getAsLong());
@@ -59,22 +69,22 @@ public final class InMemoryKeyedRateLimiter implements KeyedRateLimiter {
     public RateLimitDecision tryAcquire(String key, int permits) {
         Objects.requireNonNull(key, "key");
         maybeSweep();
-        // Acquire inside compute() so a concurrent sweep can't remove this key's bucket mid-use.
+        // Acquire inside compute() so a concurrent sweep can't remove this key's state mid-use.
         // See known-issues/in-memory-keyed-sweep-race.md.
         RateLimitDecision[] decision = new RateLimitDecision[1];
-        buckets.compute(key, (k, bucket) -> {
-            if (bucket == null) {
-                bucket = new TokenBucketRateLimiter(capacity, refillTokens, refillPeriod, nanoTimeSource);
+        states.compute(key, (k, state) -> {
+            if (state == null) {
+                state = newState.get();
             }
-            decision[0] = bucket.decide(permits);
-            return bucket;
+            decision[0] = state.decide(permits);
+            return state;
         });
         return decision[0];
     }
 
-    /** Number of buckets currently held. */
+    /** Number of keys currently tracked. */
     int size() {
-        return buckets.size();
+        return states.size();
     }
 
     private void maybeSweep() {
@@ -87,8 +97,8 @@ public final class InMemoryKeyedRateLimiter implements KeyedRateLimiter {
         if (!lastSweepNanos.compareAndSet(last, now)) {
             return;
         }
-        for (String key : buckets.keySet()) {
-            buckets.computeIfPresent(key, (k, bucket) -> bucket.isFull() ? null : bucket);
+        for (String key : states.keySet()) {
+            states.computeIfPresent(key, (k, state) -> state.isIdle() ? null : state);
         }
     }
 }
